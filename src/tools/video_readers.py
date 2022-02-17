@@ -81,12 +81,15 @@ class AdvancedFrameReader:
 
 class IterableFrameReader:
 
-    def __init__(self, video_filename, skip_frames=0, output_shape=None, progress_bar=False, preload=False):
+    def __init__(self, video_filename, skip_frames=0, output_shape=None, progress_bar=False, preload=False, max_frame=0):
 
         self.video = cv2.VideoCapture(video_filename)
         self.input_shape = (self.video.get(cv2.CAP_PROP_FRAME_WIDTH), self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self.skip_frames = skip_frames
         self.preload = preload
+        self.total_num_frames = self.video.get(cv2.CAP_PROP_FRAME_COUNT)
+        self.max_num_frames = min(max_frame, self.total_num_frames) if max_frame!=0 else self.total_num_frames
+        self.counter = 0
 
         if output_shape is None:
             w, h = self.input_shape
@@ -100,16 +103,15 @@ class IterableFrameReader:
 
         print(f'Reading video at {self.fps}fps.')
         if progress_bar:
-            self.progress_bar = tqdm(total=int(self.video.get(cv2.CAP_PROP_FRAME_COUNT)/(self.skip_frames+1)), leave=True)
+            self.progress_bar = tqdm(total=int(self.max_num_frames/(self.skip_frames+1)), leave=True)
             self.progress_bar_update = self.progress_bar.update
         else:
             self.progress_bar_update = lambda: None
-            self.progress_bar = None
 
         if self.preload:
             print('Preloading frames in RAM...')
             self.frames = self._load_all_frames()
-            self.counter = 0
+
 
     def _load_all_frames(self):
         frames = []
@@ -122,21 +124,23 @@ class IterableFrameReader:
         return frames
 
     def __next__(self):
+        self.counter+=1
         if self.preload:
             if self.counter < len(self.frames):
                 frame = self.frames[self.counter]
-                self.counter+=1
                 self.progress_bar_update()
                 return frame
         else:
-            ret, frame = self._read_frame()
-            if ret:
-                return frame
+            if self.counter < self.max_num_frames:
+                ret, frame = self._read_frame()
+                if ret:
+                    return frame
 
         self.counter=0
         self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
         if self.progress_bar: self.progress_bar.reset()
         raise StopIteration
+
 
     def _read_frame(self):
         ret, frame = self.video.read()
@@ -151,7 +155,9 @@ class IterableFrameReader:
 
     def _skip_frames(self):
         for _ in range(self.skip_frames):
+            self.counter+=1
             self.video.read()
+
 
 class SimpleVideoReader:
     def __init__(self, video_filename, skip_frames=0):

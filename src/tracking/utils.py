@@ -8,7 +8,8 @@ from tools.video_readers import TorchIterableFromReader
 from time import time
 from detection.transforms import TransformFrames
 from collections import defaultdict
-
+from moviepy.editor import ImageSequenceClip
+from skimage.transform import downscale_local_mean
 
 class GaussianMixture(object):
     def __init__(self, means, covariance, weights):
@@ -31,11 +32,11 @@ class GaussianMixture(object):
             result += weight*component.cdf(x)
         return result
 
-def init_trackers(engine, detections, frame_nb, state_variance, observation_variance, delta):
+def init_trackers(engine, detections, confs, labels, frame_nb, state_variance, observation_variance, delta):
     trackers = []
 
-    for detection in detections:
-        tracker_for_detection = engine(frame_nb, detection, state_variance, observation_variance, delta)
+    for detection, conf, label in zip(detections, confs, labels):
+        tracker_for_detection = engine(frame_nb, detection, conf, label, state_variance, observation_variance, delta)
         trackers.append(tracker_for_detection)
 
     return trackers
@@ -81,6 +82,58 @@ def get_detections_for_video(reader, detector, batch_size=16, device=None):
     return detections
 
 
+def generate_video_with_annotations(video, output_detected, output_filename, skip_frames, maxframes, downscale, logger):
+    fps = 24
+    logger.info("---intepreting json")
+    results = defaultdict(list)
+    for trash in output_detected["detected_trash"]:
+        for k, v in trash["frame_to_box"].items():
+            frame_nb = int(k) - 1
+            object_nb = trash["id"] + 1
+            object_class = trash["label"]
+            center_x = v[0]
+            center_y = v[1]
+            results[frame_nb * (skip_frames+1)].append((object_nb, center_x, center_y, object_class))
+            # append next skip_frames
+            if str(frame_nb + 2) in trash["frame_to_box"]:
+                next_trash = trash["frame_to_box"][str(frame_nb + 2)]
+                next_x = next_trash[0]
+                next_y = next_trash[1]
+                for i in range(1, skip_frames+1):
+                    new_x = center_x + (next_x - center_x) * i/(skip_frames+1)
+                    new_y = center_y + (next_y - center_y) * i/(skip_frames+1)
+                    results[frame_nb * (skip_frames+1) + i].append((object_nb, new_x, new_y, object_class))
+    logger.info("---writing video")
+
+    #fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    # writer = cv2.VideoWriter(filename=output_filename,
+                                    #apiPreference=cv2.CAP_FFMPEG,
+    #                                fourcc=fourcc,
+    #                                fps=fps,
+    #                                frameSize=video.shape)
+
+    font = cv2.FONT_HERSHEY_COMPLEX
+    ret, frame, frame_nb = video.read()
+    frames = []
+    while ret:
+        detections_for_frame = results[frame_nb]
+        for detection in detections_for_frame:
+            cv2.putText(frame, f'{detection[0]}/{detection[3]}', (int(detection[1]), int(detection[2])+5), font, 2, (0, 0, 255), 3, cv2.LINE_AA)
+
+        frame = downscale_local_mean(frame, (downscale,downscale,1)).astype(np.uint8)
+        frames.append(frame[:,:,::-1])
+
+        ret, frame, frame_nb = video.read()
+        if frame_nb > maxframes:
+            break
+
+    clip = ImageSequenceClip(sequence=frames, fps=fps)
+    clip.write_videofile(output_filename, fps=fps)
+    del frames
+
+    logger.info("---finished writing video")
+
+
 def resize_external_detections(detections, ratio):
 
     for detection_nb in range(len(detections)):
@@ -106,9 +159,9 @@ def write_tracking_results_to_file(results, ratio_x, ratio_y, output_filename):
                                                                 result[1]+1,
                                                                 ratio_x * result[2],
                                                                 ratio_y * result[3],
-                                                                0,
-                                                                0,
-                                                                -1,-1,-1,-1))
+                                                                0, #width
+                                                                0, #height
+                                                                result[4],result[5],-1,-1))
 
 
 def read_tracking_results(input_file):
@@ -124,7 +177,9 @@ def read_tracking_results(input_file):
         left, top, width, height = result[2:6]
         center_x = left + width/2
         center_y = top + height/2
-        tracklets[track_id].append((frame_id, center_x, center_y))
+        conf = result[6]
+        class_id = result[7]
+        tracklets[track_id].append((frame_id, center_x, center_y, conf, class_id))
 
     tracklets = list(tracklets.values())
     return tracklets

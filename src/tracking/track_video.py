@@ -81,12 +81,32 @@ def associate_detections_to_trackers(detections_for_frame, trackers, flow01, con
 
     return assigned_trackers
 
-def track_video(reader, detections, args, engine, transition_variance, observation_variance, display):
+
+def interpret_detection(detections_for_frame, downsampling_factor, is_yolo=False):
+    """
+    normalizes the detections depending whether they come from centernet or yolo
+    """
+    if not is_yolo:
+        confs = [0.0]*len(detections_for_frame)
+        labels = [0]*len(detections_for_frame)
+        return detections_for_frame, confs, labels
+    else:
+        detections_for_frame, confs, labels = detections_for_frame
+        # get center
+        detections_for_frame = detections_for_frame[...,0:2] / downsampling_factor
+        return detections_for_frame, confs, labels
+
+
+def track_video(reader, detections, args, engine, transition_variance, observation_variance, display, is_yolo=False):
+    """
+    Original version. Expects detections in the format list[np.array([[xcenter, ycenter], ...]), ...]
+    """
     init = False
     trackers = dict()
     frame_nb = 0
     frame0 = next(reader)
     detections_for_frame = next(detections)
+    detections_for_frame, confs, labels = interpret_detection(detections_for_frame, args.downsampling_factor, is_yolo)
 
     max_distance = euclidean(reader.output_shape, np.array([0,0]))
     delta = 0.05*max_distance
@@ -97,19 +117,20 @@ def track_video(reader, detections, args, engine, transition_variance, observati
         display.update_detections_and_frame(detections_for_frame, frame0)
 
     if len(detections_for_frame):
-        trackers = init_trackers(engine, detections_for_frame, frame_nb, transition_variance, observation_variance, delta)
+        trackers = init_trackers(engine, detections_for_frame, confs, labels, frame_nb, transition_variance, observation_variance, delta)
         init = True
 
     if display is not None and display.on: display.display(trackers)
 
     for frame_nb, (frame1, detections_for_frame) in enumerate(zip(reader, detections), start=1):
+        detections_for_frame, confs, labels = interpret_detection(detections_for_frame, args.downsampling_factor, is_yolo)
 
         if display is not None and display.on:
             display.update_detections_and_frame(detections_for_frame, frame1)
 
         if not init:
             if len(detections_for_frame):
-                trackers = init_trackers(engine, detections_for_frame, frame_nb, transition_variance, observation_variance, delta)
+                trackers = init_trackers(engine, detections_for_frame, confs, labels, frame_nb, transition_variance, observation_variance, delta)
                 init = True
 
         else:
@@ -122,12 +143,12 @@ def track_video(reader, detections, args, engine, transition_variance, observati
                 assigned_trackers = associate_detections_to_trackers(detections_for_frame, trackers,
                                                                      flow01, args.confidence_threshold)
 
-                for detection, assigned_tracker in zip(detections_for_frame, assigned_trackers):
+                for detection, conf, label, assigned_tracker in zip(detections_for_frame, confs, labels, assigned_trackers):
                     if in_frame(detection, flow01.shape[:-1]):
                         if assigned_tracker is None :
-                            new_trackers.append(engine(frame_nb, detection, transition_variance, observation_variance, delta))
+                            new_trackers.append(engine(frame_nb, detection, conf, label, transition_variance, observation_variance, delta))
                         else:
-                            trackers[assigned_tracker].update(detection, flow01, frame_nb)
+                            trackers[assigned_tracker].update(detection, conf, label, flow01, frame_nb)
 
             for tracker in trackers:
                 tracker.update_status(flow01)
@@ -139,13 +160,12 @@ def track_video(reader, detections, args, engine, transition_variance, observati
             display.display(trackers)
         frame0 = frame1.copy()
 
-
     results = []
     tracklets = [tracker.tracklet for tracker in trackers]
 
-    for tracker_nb, associated_detections in enumerate(tracklets):
-        for associated_detection in associated_detections:
-            results.append((associated_detection[0], tracker_nb, associated_detection[1][0], associated_detection[1][1]))
+    for tracker_nb, dets in enumerate(tracklets):
+        for det in dets:
+            results.append((det[0], tracker_nb, det[1][0], det[1][1], det[2], det[3]))
 
     results = sorted(results, key=lambda x: x[0])
 

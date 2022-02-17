@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import os
 from detection.detect import detect
+from detection.yolo import load_model, predict_yolo
 from tracking.postprocess_and_count_tracks import filter_tracks, postprocess_for_api
 from tracking.utils import get_detections_for_video, write_tracking_results_to_file, read_tracking_results, gather_tracklets
 from tracking.track_video import track_video
@@ -21,6 +22,18 @@ from tools.misc import load_model
 from tracking.trackers import get_tracker
 import torch
 
+id_categories = {
+    0: 'Fragment',    #'Sheet / tarp / plastic bag / fragment',
+    1: 'Insulating',  #'Insulating material',
+    2: 'Bottle',      #'Bottle-shaped',
+    3: 'Can',         #'Can-shaped',
+    4: 'Drum',
+    5: 'Packaging',   #'Other packaging',
+    6: 'Tire',
+    7: 'Fishing net', #'Fishing net / cord',
+    8: 'Easily namable',
+    9: 'Unclear'
+}
 
 class DotDict(dict):
     """dot.notation access to dictionary attributes"""
@@ -46,6 +59,11 @@ config_track = DotDict({
 
 
 UPLOAD_FOLDER = '/tmp'  # folder used to store images or videos when sending files
+logger.info('---Yolo model...')
+URL_MODEL = "https://github.com/surfriderfoundationeurope/IA_Pau/releases/download/v0.1/yolov5.pt"
+FILE_MODEL = "yolov5.pt"
+model_path = download_model_from_url(URL_MODEL, FILE_MODEL, logger)
+model_yolo = load_model(model_path, config_track.device)
 
 
 def create_unique_folder(base_folder, filename):
