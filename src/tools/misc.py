@@ -4,18 +4,6 @@ import math
 import cv2
 import torch
 import torchvision.transforms.functional as F
-import os.path as op
-from urllib.request import urlretrieve
-
-
-def download_model_from_url(url, filename, logger):
-    model_filename = op.realpath('./models/' + filename)
-    if not op.exists(model_filename):
-        logger.info('---Downloading model...')
-        urlretrieve(url, model_filename)
-    else:
-        logger.info('---Model already downloaded.')
-    return model_filename
 
 
 class ResizeForCenterNet(object):
