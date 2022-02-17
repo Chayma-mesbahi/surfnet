@@ -25,13 +25,13 @@ config_track = DotDict({
     "downsampling_factor": 4,
     "noise_covariances_path": "data/tracking_parameters",
     "output_shape": (960,544),
-    "size": 768,
-    "skip_frames": 7, #3
+    "size": 960,
+    "skip_frames": 3, #3
     "device": "cpu",
     "detection_batch_size": 1,
     "display": 0,
     "kappa": 4, #7
-    "tau": 3, #4
+    "tau": 4, #4
 })
 
 logging_config = {
