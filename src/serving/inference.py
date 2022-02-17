@@ -1,6 +1,7 @@
+import numpy as np
 import json
-import multiprocessing
 import os
+import os.path as op
 from typing import Dict, List, Tuple
 
 import datetime
@@ -9,53 +10,16 @@ from werkzeug.utils import secure_filename
 import logging
 
 # imports for tracking
-import cv2
-import numpy as np
-import os
-from detection.detect import detect
 from detection.yolo import load_model, predict_yolo
 from tracking.postprocess_and_count_tracks import filter_tracks, postprocess_for_api
-from tracking.utils import get_detections_for_video, write_tracking_results_to_file, read_tracking_results, gather_tracklets
+from tracking.utils import write_tracking_results_to_file, read_tracking_results
 from tracking.track_video import track_video
 from tools.video_readers import IterableFrameReader
-from tools.misc import load_model
+from tools.files import download_model_from_url, create_unique_folder
 from tracking.trackers import get_tracker
-import torch
 
-id_categories = {
-    0: 'Fragment',    #'Sheet / tarp / plastic bag / fragment',
-    1: 'Insulating',  #'Insulating material',
-    2: 'Bottle',      #'Bottle-shaped',
-    3: 'Can',         #'Can-shaped',
-    4: 'Drum',
-    5: 'Packaging',   #'Other packaging',
-    6: 'Tire',
-    7: 'Fishing net', #'Fishing net / cord',
-    8: 'Easily namable',
-    9: 'Unclear'
-}
-
-class DotDict(dict):
-    """dot.notation access to dictionary attributes"""
-    __getattr__ = dict.get
-    __setattr__ = dict.__setitem__
-    __delattr__ = dict.__delitem__
-
-
-config_track = DotDict({
-    "confidence_threshold": 0.5,
-    "detection_threshold": 0.3,
-    "downsampling_factor": 4,
-    "noise_covariances_path": "data/tracking_parameters",
-    "output_shape": (960,544),
-    "skip_frames": 3, #3
-    "arch": "mobilenet_v3_small",
-    "device": "cpu",
-    "detection_batch_size": 1,
-    "display": 0,
-    "kappa": 7, #7
-    "tau": 4 #4
-})
+# config
+from serving.config import id_categories, config_track
 
 logger = logging.getLogger()
 
@@ -64,18 +28,14 @@ logger.info('---Yolo model...')
 URL_MODEL = "https://github.com/surfriderfoundationeurope/IA_Pau/releases/download/v0.1/yolov5.pt"
 FILE_MODEL = "yolov5.pt"
 model_path = download_model_from_url(URL_MODEL, FILE_MODEL, logger)
-model_yolo = load_model(model_path, config_track.device)
+model_yolo = load_model(model_path, config_track.device,
+                                    config_track.yolo_conf_thrld,
+                                    config_track.yolo_iou_thrld)
 
+engine = get_tracker('EKF')
 
-def create_unique_folder(base_folder, filename):
-    """Creates a unique folder based on the filename and timestamp
-    """
-    folder_name = os.path.splitext(os.path.basename(filename))[0] + "_out_"
-    folder_name += datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
-    output_dir = os.path.join(base_folder, folder_name)
-    if not os.path.isdir(output_dir):
-        os.mkdir(output_dir)
-    return output_dir
+transition_variance = np.load(op.join(config_track.noise_covariances_path, 'transition_variance.npy'))
+observation_variance = np.load(op.join(config_track.noise_covariances_path, 'observation_variance.npy'))
 
 
 def handle_post_request(upload_folder = UPLOAD_FOLDER):
@@ -96,11 +56,11 @@ def handle_post_request(upload_folder = UPLOAD_FOLDER):
     # file and folder handling
     filename = secure_filename(file.filename)
     logger.info("---filename: "+filename)
-    full_filepath = os.path.join(upload_folder, filename)
+    full_filepath = op.join(upload_folder, filename)
     output_dir = create_unique_folder(upload_folder, filename)
-    if not os.path.isdir(upload_folder):
+    if not op.isdir(upload_folder):
         os.mkdir(upload_folder)
-    if os.path.isfile(full_filepath):
+    if op.isfile(full_filepath):
         os.remove(full_filepath)
     file.save(full_filepath)
     config_track.video_path = full_filepath
@@ -110,28 +70,14 @@ def handle_post_request(upload_folder = UPLOAD_FOLDER):
     filtered_results = track(config_track)
 
     # postprocess
-    output_json = postprocess_for_api(filtered_results)
+    output_json = postprocess_for_api(filtered_results, id_categories)
     response = jsonify(output_json)
     response.status_code = 200
     return response
 
+
 def track(args):
-    if args.device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    else:
-        device = args.device
-    device = torch.device(device)
-
-    engine = get_tracker('EKF')
-
-    logger.info('---Loading model...')
-    model = load_model(arch=args.arch, model_weights=args.model_weights, device=device)
-    logger.info('---Model loaded.')
-
-    detector = lambda frame: detect(frame, threshold=args.detection_threshold, model=model)
-
-    transition_variance = np.load(os.path.join(args.noise_covariances_path, 'transition_variance.npy'))
-    observation_variance = np.load(os.path.join(args.noise_covariances_path, 'observation_variance.npy'))
+    detector = lambda frame: predict_yolo(model_yolo, frame, size=args.size, augment=False)
 
     logger.info(f'---Processing {args.video_path}')
     reader = IterableFrameReader(video_filename=args.video_path,
@@ -140,18 +86,19 @@ def track(args):
                                  progress_bar=True,
                                  preload=args.preload_frames)
 
-
     input_shape = reader.input_shape
     output_shape = reader.output_shape
     ratio_y = input_shape[0] / (output_shape[0] // args.downsampling_factor)
     ratio_x = input_shape[1] / (output_shape[1] // args.downsampling_factor)
 
+    detections = []
     logger.info('---Detecting...')
-    detections = get_detections_for_video(reader, detector, batch_size=args.detection_batch_size, device=device)
+    for frame in reader:
+        detections.append(detector(frame))
 
     logger.info('---Tracking...')
     display = None
-    results = track_video(reader, iter(detections), args, engine, transition_variance, observation_variance, display)
+    results = track_video(reader, iter(detections), args, engine, transition_variance, observation_variance, display, is_yolo=True)
 
     # store unfiltered results
     datestr = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
@@ -161,7 +108,7 @@ def track(args):
 
     # read from the file
     results = read_tracking_results(output_filename)
-    filtered_results = filter_tracks(results, config_track.kappa, config_track.tau)
+    filtered_results = filter_tracks(results, args.kappa, args.tau)
     # store filtered results
     output_filename = os.path.splitext(args.video_path)[0] + "_" + datestr + '_filtered.txt'
     write_tracking_results_to_file(filtered_results, ratio_x=ratio_x, ratio_y=ratio_y, output_filename=output_filename)

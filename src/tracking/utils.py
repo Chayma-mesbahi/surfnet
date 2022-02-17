@@ -157,11 +157,11 @@ def write_tracking_results_to_file(results, ratio_x, ratio_y, output_filename):
         for result in results:
             output_file.write('{},{},{},{},{},{},{},{},{},{}\n'.format(result[0]+1,
                                                                 result[1]+1,
-                                                                ratio_x * result[2],
-                                                                ratio_y * result[3],
+                                                                round(ratio_x * result[2],2),
+                                                                round(ratio_y * result[3],2),
                                                                 0, #width
                                                                 0, #height
-                                                                result[4],result[5],-1,-1))
+                                                                round(result[4],2),result[5],-1,-1))
 
 
 def read_tracking_results(input_file):
