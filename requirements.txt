@@ -1,4 +1,7 @@
+scikit-image
 opencv-python
+torch
+torchvision
 pycocotools
 debugpy
 scipy
@@ -10,3 +13,5 @@ flask
 werkzeug
 gunicorn
 git+https://github.com/pykalman/pykalman.git
+yolov5
+moviepy

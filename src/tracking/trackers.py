@@ -4,26 +4,27 @@ from tracking.utils import in_frame, exp_and_normalise, GaussianMixture
 from pykalman import KalmanFilter, AdditiveUnscentedKalmanFilter
 import matplotlib.patches as mpatches
 
+
 class Tracker:
 
-    def __init__(self, frame_nb, X0, transition_variance, observation_variance, delta):
+    def __init__(self, frame_nb, X0, confidence, class_id, transition_variance, observation_variance, delta):
 
         self.transition_covariance = np.diag(transition_variance)
         self.observation_covariance = np.diag(observation_variance)
         self.updated = False
         self.steps_since_last_observation = 0
         self.enabled = True
-        self.tracklet = [(frame_nb, X0)]
+        self.tracklet = [(frame_nb, X0, confidence, class_id)]
         self.delta = delta
 
-    def store_observation(self, observation, frame_nb):
-        self.tracklet.append((frame_nb, observation))
+    def store_observation(self, observation, frame_nb, confidence, class_id):
+        self.tracklet.append((frame_nb, observation, confidence, class_id))
         self.updated = True
 
     def update_status(self, flow):
         if self.enabled and not self.updated:
             self.steps_since_last_observation += 1
-            self.enabled = self.update(None, flow)
+            self.enabled = self.update(None, None, None, flow)
         else:
             self.steps_since_last_observation = 0
         self.updated = False
@@ -45,37 +46,37 @@ class Tracker:
                 + distribution.cdf(left_low)
 
         distribution = self.predictive_distribution(flow)
-        
+
         return lambda coord: confidence_from_multivariate_distribution(coord, distribution)
-    
+
     def get_display_colors(self, display, tracker_nb):
         colors = display.colors
         color = colors[tracker_nb % len(colors)]
         display.legends.append(mpatches.Patch(color=color, label=len(self.tracklet)))
         return colors[tracker_nb % len(colors)]
 
-class SMC(Tracker):     
+class SMC(Tracker):
     def set_param(param):
         SMC.n_particles = int(param)
 
-    def __init__(self, frame_nb, X0, transition_variance, observation_variance, delta):
-        super().__init__(frame_nb, X0, transition_variance, observation_variance, delta)
+    def __init__(self, frame_nb, X0, confidence, class_id, transition_variance, observation_variance, delta):
+        super().__init__(frame_nb, X0, confidence, class_id, transition_variance, observation_variance, delta)
 
         self.particles = multivariate_normal(
             X0, cov=self.observation_covariance).rvs(SMC.n_particles)
         self.normalized_weights = np.ones(SMC.n_particles)/SMC.n_particles
 
-    def update(self, observation, flow, frame_nb=None):
-        if observation is not None: self.store_observation(observation, frame_nb)
+    def update(self, observation, confidence, class_id, flow, frame_nb=None):
+        if observation is not None: self.store_observation(observation, frame_nb, confidence, class_id)
         self.resample()
         enabled = self.move_particles(flow)
-        if observation is not None: 
+        if observation is not None:
             self.importance_reweighting(observation)
-        else: 
+        else:
             self.normalized_weights = np.ones(
                 len(self.particles))/len(self.particles)
 
-        return enabled 
+        return enabled
 
     def state_transition(self, state, flow):
 
@@ -84,7 +85,7 @@ class SMC(Tracker):
                  max(0, int(state[0])), :]
         cov = np.diag(self.transition_covariance)
         return multivariate_normal(mean, cov)
-    
+
     def observation(self, state):
 
         return multivariate_normal(state, self.observation_covariance)
@@ -100,7 +101,7 @@ class SMC(Tracker):
             enabled = True
         else:
             enabled = False
-        
+
         return enabled
 
     def importance_reweighting(self, observation):
@@ -141,12 +142,12 @@ class SMC(Tracker):
         color = self.get_display_colors(display, tracker_nb)
         display.ax.scatter(self.particles[:,0], self.particles[:,1], s=5, c=color)
 
-class EKF(Tracker): 
+class EKF(Tracker):
 
-    def __init__(self, frame_nb, X0, transition_variance, observation_variance, delta):
-            super().__init__(frame_nb, X0, transition_variance, observation_variance, delta)
-            self.filter = KalmanFilter(initial_state_mean=X0, 
-                                       initial_state_covariance=self.observation_covariance, 
+    def __init__(self, frame_nb, X0, confidence, class_id, transition_variance, observation_variance, delta):
+            super().__init__(frame_nb, X0, confidence, class_id, transition_variance, observation_variance, delta)
+            self.filter = KalmanFilter(initial_state_mean=X0,
+                                       initial_state_covariance=self.observation_covariance,
                                        transition_covariance=self.transition_covariance,
                                        observation_matrices=np.eye(2),
                                        observation_covariance=self.observation_covariance)
@@ -160,20 +161,20 @@ class EKF(Tracker):
 
 
         grad_flow_value = np.array([np.gradient(flow[:,:,0]),np.gradient(flow[:,:,1])])[:,:,int(self.filtered_state_mean[1]),int(self.filtered_state_mean[0])]
-        return np.eye(2) + grad_flow_value, flow_value - grad_flow_value.dot(self.filtered_state_mean) 
+        return np.eye(2) + grad_flow_value, flow_value - grad_flow_value.dot(self.filtered_state_mean)
 
-        
+
     def EKF_step(self, observation, flow):
         transition_matrix, transition_offset = self.get_update_parameters(flow)
 
-        return self.filter.filter_update(self.filtered_state_mean, 
-                                        self.filtered_state_covariance, 
+        return self.filter.filter_update(self.filtered_state_mean,
+                                        self.filtered_state_covariance,
                                         transition_matrix=transition_matrix,
                                         transition_offset=transition_offset,
                                         observation=observation)
-                                                                                             
-    def update(self, observation, flow, frame_nb=None):
-        if observation is not None: self.store_observation(observation, frame_nb)
+
+    def update(self, observation, confidence, class_id, flow, frame_nb=None):
+        if observation is not None: self.store_observation(observation, frame_nb, confidence, class_id)
 
         self.filtered_state_mean, self.filtered_state_covariance = self.EKF_step(observation, flow)
 
@@ -188,10 +189,10 @@ class EKF(Tracker):
         distribution = multivariate_normal(filtered_state_mean, filtered_state_covariance + self.observation_covariance)
 
         return distribution
-    
+
     def fill_display(self, display, tracker_nb):
         yy, xx = np.mgrid[0:display.display_shape[1]:1, 0:display.display_shape[0]:1]
-        pos = np.dstack((xx, yy))    
+        pos = np.dstack((xx, yy))
         distribution = multivariate_normal(self.filtered_state_mean, self.filtered_state_covariance)
 
         color = self.get_display_colors(display, tracker_nb)
@@ -201,10 +202,10 @@ class EKF(Tracker):
 
 class UKF(Tracker):
 
-    def __init__(self, frame_nb, X0, transition_variance, observation_variance, delta):
-            super().__init__(frame_nb, X0, transition_variance, observation_variance, delta)
-            self.filter = AdditiveUnscentedKalmanFilter(initial_state_mean=X0, 
-                                        initial_state_covariance=self.observation_covariance, 
+    def __init__(self, frame_nb, X0, confidence, class_id, transition_variance, observation_variance, delta):
+            super().__init__(frame_nb, X0, confidence, class_id, transition_variance, observation_variance, delta)
+            self.filter = AdditiveUnscentedKalmanFilter(initial_state_mean=X0,
+                                        initial_state_covariance=self.observation_covariance,
                                         observation_functions = lambda z: np.eye(2).dot(z),
                                         transition_covariance=self.transition_covariance,
                                         observation_covariance=self.observation_covariance)
@@ -213,14 +214,14 @@ class UKF(Tracker):
             self.filtered_state_covariance = self.observation_covariance
 
     def UKF_step(self, observation, flow):
-        return self.filter.filter_update(self.filtered_state_mean, 
-                                        self.filtered_state_covariance, 
+        return self.filter.filter_update(self.filtered_state_mean,
+                                        self.filtered_state_covariance,
                                         transition_function=lambda x: x + flow[int(x[1]),int(x[0]),:],
                                         observation=observation)
 
-                                                                                             
-    def update(self, observation, flow, frame_nb=None):
-        if observation is not None: self.store_observation(observation, frame_nb)
+
+    def update(self, observation, confidence, class_id, flow, frame_nb=None):
+        if observation is not None: self.store_observation(observation, frame_nb, confidence, class_id)
 
         self.filtered_state_mean, self.filtered_state_covariance = self.UKF_step(observation, flow)
 
@@ -235,10 +236,10 @@ class UKF(Tracker):
         distribution = multivariate_normal(filtered_state_mean, filtered_state_covariance + self.observation_covariance)
 
         return distribution
-    
+
     def fill_display(self, display, tracker_nb):
         yy, xx = np.mgrid[0:display.display_shape[1]:1, 0:display.display_shape[0]:1]
-        pos = np.dstack((xx, yy))    
+        pos = np.dstack((xx, yy))
         distribution = multivariate_normal(self.filtered_state_mean, self.filtered_state_covariance)
 
         color = self.get_display_colors(display, tracker_nb)
@@ -248,22 +249,19 @@ class UKF(Tracker):
 
 trackers = {'EKF': EKF,
            'SMC': SMC,
-           'UKF': UKF} 
+           'UKF': UKF}
 
 def get_tracker(algorithm_and_params):
     print(f'{algorithm_and_params} will be used for tracking.')
 
     splitted_name = algorithm_and_params.split('_')
-    if len(splitted_name) > 1: 
+    if len(splitted_name) > 1:
         algorithm_name, param = splitted_name
         tracker = trackers[algorithm_name]
         tracker.set_param(param)
 
-    else: 
+    else:
         algorithm_name = splitted_name[0]
         tracker = trackers[algorithm_name]
-    
+
     return tracker
-
-
-

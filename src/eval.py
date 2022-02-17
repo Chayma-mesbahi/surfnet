@@ -12,12 +12,10 @@ import math
 from scipy.spatial.distance import cdist
 from tools.misc import load_model, _calculate_euclidean_similarity
 from detection.coco_utils import get_surfrider
-from detection.transforms import TrainTransforms, ValTransforms  
+from detection.transforms import TrainTransforms, ValTransforms
 
 
 def prec_recall_for_thres(thres, thres_nb, gt, pred, radius):
-
-
 
     detections = (pred >= thres)
 

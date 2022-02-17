@@ -1,6 +1,11 @@
 # Automated object counting on riverbanks
 
-## Release Branch - Installation
+This version uses the yolov5 model as detection (multiclass).
+
+## Installation
+
+## Dev Branch - Installation
+
 
 Follow these steps in that order exactly:
 ```shell
@@ -16,6 +21,7 @@ You can download MobileNetV3 model with the following script:
 ```shell
 cd models
 sh download_pretrained_base.sh
+cd ..
 ```
 The file will be downloaded into [models](models).
 
@@ -26,11 +32,14 @@ If you want to download the 3 test videos on the 3 portions of the Auterrive riv
 ```
 cd data
 sh download_validation_videos.sh
+cd ..
 ```
 
 This will download the 3 videos in distinct folders of [data/validation_videos](data/validation_videos).
 
-## Serving
+## Run
+
+If you have custom videos, add them to [data/validation_videos](data/validation_videos) in a new subfolder. Then:
 
 ### Development
 Setting up the server and testing: from surfnet/ directory, you may run a local flask developement server with the following command:
