@@ -8,6 +8,7 @@ import datetime
 from flask import request, jsonify
 from werkzeug.utils import secure_filename
 import logging
+import warnings
 
 # imports for tracking
 from detection.yolo import load_model, predict_yolo
@@ -25,6 +26,8 @@ logger = logging.getLogger()
 
 UPLOAD_FOLDER = '/tmp'  # folder used to store images or videos when sending files
 logger.info('---Yolo model...')
+# Yolo has warning problems, so we set an env variable to remove it
+os.environ["VERBOSE"] = "False"
 URL_MODEL = "https://github.com/surfriderfoundationeurope/IA_Pau/releases/download/v0.1/yolov5.pt"
 FILE_MODEL = "yolov5.pt"
 model_path = download_model_from_url(URL_MODEL, FILE_MODEL, logger)
@@ -93,8 +96,10 @@ def track(args):
 
     detections = []
     logger.info('---Detecting...')
-    for frame in reader:
-        detections.append(detector(frame))
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore")
+        for frame in reader:
+            detections.append(detector(frame))
 
     logger.info('---Tracking...')
     display = None
