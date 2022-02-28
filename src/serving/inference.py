@@ -99,7 +99,7 @@ def track(args):
     logger.info('---Tracking...')
     display = None
     results = track_video(reader, iter(detections), args, engine, transition_variance, observation_variance, display, is_yolo=True)
-
+    reader.video.release()
     # store unfiltered results
     datestr = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
     output_filename = os.path.splitext(args.video_path)[0] + "_" + datestr + '_unfiltered.txt'

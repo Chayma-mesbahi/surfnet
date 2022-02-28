@@ -2,6 +2,7 @@ import cv2
 import torch
 from tqdm import tqdm
 from itertools import cycle
+
 class AdvancedFrameReader:
     def __init__(self, video_name, read_every, rescale_factor, init_time_min, init_time_s):
 
@@ -79,15 +80,18 @@ class AdvancedFrameReader:
     def reset_init_rescale_factor(self):
         self.set_rescale_factor(self.init_rescale_factor)
 
-class IterableFrameReader:
 
+class IterableFrameReader:
     def __init__(self, video_filename, skip_frames=0, output_shape=None, progress_bar=False, preload=False, max_frame=0):
+        self.video_filename = video_filename
+        self.max_frame_arg = max_frame
 
         self.video = cv2.VideoCapture(video_filename)
         self.input_shape = (self.video.get(cv2.CAP_PROP_FRAME_WIDTH), self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self.skip_frames = skip_frames
         self.preload = preload
         self.total_num_frames = self.video.get(cv2.CAP_PROP_FRAME_COUNT)
+
         self.max_num_frames = min(max_frame, self.total_num_frames) if max_frame!=0 else self.total_num_frames
         self.counter = 0
 
@@ -112,6 +116,13 @@ class IterableFrameReader:
             print('Preloading frames in RAM...')
             self.frames = self._load_all_frames()
 
+    def reset_video(self):
+        """ This method is needed as cv2.CAP_PROP_POS_FRAMES
+        does not work on all backends
+        """
+        self.video.release()
+        self.__init__(self.video_filename, self.skip_frames, self.output_shape,
+                      self.progress_bar is not None, self.preload, self.max_frame_arg)
 
     def _load_all_frames(self):
         frames = []
@@ -136,9 +147,7 @@ class IterableFrameReader:
                 if ret:
                     return frame
 
-        self.counter=0
-        self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        if self.progress_bar: self.progress_bar.reset()
+        self.reset_video()
         raise StopIteration
 
 
