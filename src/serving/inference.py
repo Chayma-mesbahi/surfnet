@@ -76,6 +76,10 @@ def handle_post_request(upload_folder = UPLOAD_FOLDER):
     output_json = postprocess_for_api(filtered_results, id_categories)
     response = jsonify(output_json)
     response.status_code = 200
+
+    # Remove temp files (esp. the video):
+    os.remove(full_filepath)
+
     return response
 
 
