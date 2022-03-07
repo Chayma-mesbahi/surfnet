@@ -3,6 +3,7 @@ import argparse
 from scipy.signal import convolve
 from tracking.utils import write_tracking_results_to_file, read_tracking_results
 from collections import defaultdict
+from statistics import mode
 
 import json
 
@@ -20,10 +21,6 @@ def filter_tracks(tracklets, kappa, tau):
     for tracker_nb, dets in enumerate(tracks):
         for det in dets:
             results.append((det[0], tracker_nb, det[1], det[2], det[3], det[4]))
-
-    # for tracker_nb, associated_detections in enumerate(tracks):
-    #     for det in associated_detections:
-    #         results.append((associated_detection[0], tracker_nb, associated_detection[1], associated_detection[2]))
 
     results = sorted(results, key=lambda x: x[0])
     return results
@@ -47,11 +44,20 @@ def postprocess_for_api(results, class_dict=defaultdict(lambda: "fragment")):
             result_list.append({"label":classname,
                                 "id": id,
                                 "frame_to_box": {str(frame_number): box},
-                                "frame_to_conf": {str(frame_number): conf}})
+                                "frame_to_conf": {str(frame_number): conf},
+                                "frame_to_classid": {str(frame_number): res[5]}})
         # otherwise, retrieve the jsonline and append the box
         else:
             result_list[id_list[id]]["frame_to_box"][str(frame_number)] = box
             result_list[id_list[id]]["frame_to_conf"][str(frame_number)] = conf
+            result_list[id_list[id]]["frame_to_classid"][str(frame_number)] = res[5]
+
+    # Finally, collapse the confidence and class
+    for res in result_list:
+        avg_conf = np.mean(list(res.pop("frame_to_conf").values()))
+        res["avg_conf"] = round(avg_conf, 2)
+        majority_classid = mode(list(res.pop("frame_to_classid").values()))
+        res["label"] = class_dict[majority_classid]
 
     return {"detected_trash": result_list}
 
@@ -64,6 +70,7 @@ def count_objects(input_json, class_dict):
         total += 1
 
     return {k+f": {str(v)}":v/total for k,v in results.items()}
+
 
 def write(results, output_name):
     """ Writes the results in two files:

@@ -93,8 +93,8 @@ def handle_post_request(upload_folder = UPLOAD_FOLDER):
 
 
 def track(args):
-    #detector = lambda frame: predict_yolo(model_yolo, frame, size=args.size, augment=False)
-    detector = lambda frame: model_yolo_ts.detect(frame)
+    detector = lambda frame: predict_yolo(model_yolo, frame, size=args.size, augment=False)
+    # detector = lambda frame: model_yolo_ts.detect(frame)
 
     logger.info(f'---Processing {args.video_path}')
     reader = IterableFrameReader(video_filename=args.video_path,

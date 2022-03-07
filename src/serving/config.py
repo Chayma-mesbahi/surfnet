@@ -24,8 +24,8 @@ config_track = DotDict({
     "confidence_threshold": 0.4, # for the tracking part
     "downsampling_factor": 4,
     "noise_covariances_path": "data/tracking_parameters",
-    "output_shape": (640,640),
-    "size": 640,
+    "output_shape": (640,640), # (960, 544)
+    "size": 640, # 960
     "skip_frames": 3, #3
     "device": "cpu",
     "detection_batch_size": 1,
