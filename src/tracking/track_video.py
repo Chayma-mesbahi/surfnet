@@ -5,7 +5,6 @@ from detection.detect import detect
 from tracking.utils import in_frame
 from tools.optical_flow import compute_flow
 from tracking.trackers import get_tracker
-import matplotlib.pyplot as plt
 from scipy.spatial.distance import euclidean
 from scipy.optimize import linear_sum_assignment
 import torch
@@ -79,7 +78,7 @@ def track_video(reader, detections, args, engine, transition_variance, observati
     detections_for_frame, confs, labels = interpret_detection(detections_for_frame, args.downsampling_factor, is_yolo)
 
     max_distance = euclidean(reader.output_shape, np.array([0,0]))
-    delta = 0.05*max_distance
+    delta = 0.005*max_distance
 
     if display is not None and display.on:
         display.display_shape = (reader.output_shape[0] // args.downsampling_factor, reader.output_shape[1] // args.downsampling_factor)
