@@ -10,6 +10,8 @@ from detection.transforms import TransformFrames
 from collections import defaultdict
 from moviepy.editor import ImageSequenceClip
 from skimage.transform import downscale_local_mean
+import matplotlib.pyplot as plt
+
 
 class GaussianMixture(object):
     def __init__(self, means, covariance, weights):
@@ -32,28 +34,20 @@ class GaussianMixture(object):
             result += weight*component.cdf(x)
         return result
 
-def init_trackers(engine, detections, confs, labels, frame_nb, state_variance, observation_variance, delta):
-    trackers = []
-
-    for detection, conf, label in zip(detections, confs, labels):
-        tracker_for_detection = engine(frame_nb, detection, conf, label, state_variance, observation_variance, delta)
-        trackers.append(tracker_for_detection)
-
-    return trackers
 
 def exp_and_normalise(lw):
     w = np.exp(lw - lw.max())
     return w / w.sum()
 
+
 def in_frame(position, shape, border=0.02):
-
-
     shape_x = shape[1]
     shape_y = shape[0]
     x = position[0]
     y = position[1]
 
     return x > border*shape_x and x < (1-border)*shape_x and y > border*shape_y and y < (1-border)*shape_y
+
 
 def gather_filenames_for_video_in_annotations(video, images, data_dir):
     images_for_video = [image for image in images
@@ -64,8 +58,8 @@ def gather_filenames_for_video_in_annotations(video, images, data_dir):
     return [os.path.join(data_dir, image['file_name'])
                  for image in images_for_video]
 
-def get_detections_for_video(reader, detector, batch_size=16, device=None):
 
+def get_detections_for_video(reader, detector, batch_size=16, device=None):
     detections = []
     dataset = TorchIterableFromReader(reader, TransformFrames())
     loader = DataLoader(dataset, batch_size=batch_size)
@@ -135,7 +129,6 @@ def generate_video_with_annotations(video, output_detected, output_filename, ski
 
 
 def resize_external_detections(detections, ratio):
-
     for detection_nb in range(len(detections)):
         detection = detections[detection_nb]
         if len(detection):
@@ -187,6 +180,7 @@ def read_tracking_results(input_file):
     tracklets = list(tracklets.values())
     return tracklets
 
+
 def gather_tracklets(tracklist):
     """ Converts a list of flat tracklets into a list of lists
     """
@@ -200,6 +194,7 @@ def gather_tracklets(tracklist):
 
     tracklets = list(tracklets.values())
     return tracklets
+
 
 class FramesWithInfo:
     def __init__(self, frames, output_shape=None):
@@ -215,9 +210,53 @@ class FramesWithInfo:
             frame = self.frames[self.read_head]
             self.read_head+=1
             return frame
-
         else:
             raise StopIteration
 
     def __iter__(self):
         return self
+
+
+class Display:
+    """ Display tracking
+    """
+    def __init__(self, on, interactive=True):
+        self.on = on
+        self.fig, self.ax = plt.subplots()
+        self.interactive = interactive
+        if interactive:
+            plt.ion()
+        self.colors =  plt.rcParams['axes.prop_cycle'].by_key()['color']
+        self.legends = []
+        self.plot_count = 0
+
+    def display(self, trackers):
+
+        something_to_show = False
+        for tracker_nb, tracker in enumerate(trackers):
+            if tracker.enabled:
+                tracker.fill_display(self, tracker_nb)
+                something_to_show = True
+
+        self.ax.imshow(self.latest_frame_to_show)
+
+        if len(self.latest_detections):
+            self.ax.scatter(self.latest_detections[:, 0], self.latest_detections[:, 1], c='r', s=40)
+
+        if something_to_show:
+            self.ax.xaxis.tick_top()
+            plt.legend(handles=self.legends)
+            self.fig.canvas.draw()
+            if self.interactive:
+                plt.show()
+                while not plt.waitforbuttonpress():
+                    continue
+            else:
+                plt.savefig(os.path.join('plots',str(self.plot_count)))
+            self.ax.cla()
+            self.legends = []
+            self.plot_count+=1
+
+    def update_detections_and_frame(self, latest_detections, frame):
+        self.latest_detections = latest_detections
+        self.latest_frame_to_show = cv2.cvtColor(cv2.resize(frame, self.display_shape), cv2.COLOR_BGR2RGB)

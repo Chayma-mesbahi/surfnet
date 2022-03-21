@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import os
 from detection.detect import detect
-from tracking.utils import in_frame, init_trackers
+from tracking.utils import in_frame
 from tools.optical_flow import compute_flow
 from tracking.trackers import get_tracker
 import matplotlib.pyplot as plt
@@ -11,47 +11,14 @@ from scipy.optimize import linear_sum_assignment
 import torch
 
 
-class Display:
-    def __init__(self, on, interactive=True):
-        self.on = on
-        self.fig, self.ax = plt.subplots()
-        self.interactive = interactive
-        if interactive:
-            plt.ion()
-        self.colors =  plt.rcParams['axes.prop_cycle'].by_key()['color']
-        self.legends = []
-        self.plot_count = 0
-
-    def display(self, trackers):
-
-        something_to_show = False
-        for tracker_nb, tracker in enumerate(trackers):
-            if tracker.enabled:
-                tracker.fill_display(self, tracker_nb)
-                something_to_show = True
-
-        self.ax.imshow(self.latest_frame_to_show)
-
-        if len(self.latest_detections):
-            self.ax.scatter(self.latest_detections[:, 0], self.latest_detections[:, 1], c='r', s=40)
-
-        if something_to_show:
-            self.ax.xaxis.tick_top()
-            plt.legend(handles=self.legends)
-            self.fig.canvas.draw()
-            if self.interactive:
-                plt.show()
-                while not plt.waitforbuttonpress():
-                    continue
-            else:
-                plt.savefig(os.path.join('plots',str(self.plot_count)))
-            self.ax.cla()
-            self.legends = []
-            self.plot_count+=1
-
-    def update_detections_and_frame(self, latest_detections, frame):
-        self.latest_detections = latest_detections
-        self.latest_frame_to_show = cv2.cvtColor(cv2.resize(frame, self.display_shape), cv2.COLOR_BGR2RGB)
+def init_trackers(engine, detections, confs, labels, frame_nb, state_variance, observation_variance, delta):
+    """ Initializes the trackers based on detections
+    """
+    trackers = []
+    for detection, conf, label in zip(detections, confs, labels):
+        tracker_for_detection = engine(frame_nb, detection, conf, label, state_variance, observation_variance, delta)
+        trackers.append(tracker_for_detection)
+    return trackers
 
 
 def build_confidence_function_for_trackers(trackers, flow01):
@@ -74,7 +41,7 @@ def associate_detections_to_trackers(detections_for_frame, confs, labels, tracke
                 score = confidence_function(detection)
                 cls_score = trackers[tracker_id].cls_score_function(conf, label)
                 if cls_score < 0.5:
-                    score = score * 0.1 # if wrong class, reduce the score to 10%, to tweak
+                    score = score * 0.1 # if wrong class, reduce the score, to tweak
                 if score > confidence_threshold:
                     cost_matrix[detection_nb, tracker_id] = score
                 else:
@@ -87,8 +54,7 @@ def associate_detections_to_trackers(detections_for_frame, confs, labels, tracke
 
 
 def interpret_detection(detections_for_frame, downsampling_factor, is_yolo=False):
-    """
-    normalizes the detections depending whether they come from centernet or yolo
+    """ normalizes the detections depending whether they come from centernet or yolo
     """
     if not is_yolo:
         confs = [0.0]*len(detections_for_frame)
@@ -116,7 +82,6 @@ def track_video(reader, detections, args, engine, transition_variance, observati
     delta = 0.05*max_distance
 
     if display is not None and display.on:
-
         display.display_shape = (reader.output_shape[0] // args.downsampling_factor, reader.output_shape[1] // args.downsampling_factor)
         display.update_detections_and_frame(detections_for_frame, frame0)
 
@@ -136,14 +101,11 @@ def track_video(reader, detections, args, engine, transition_variance, observati
             if len(detections_for_frame):
                 trackers = init_trackers(engine, detections_for_frame, confs, labels, frame_nb, transition_variance, observation_variance, delta)
                 init = True
-
         else:
-
             new_trackers = []
             flow01 = compute_flow(frame0, frame1, args.downsampling_factor)
 
             if len(detections_for_frame):
-
                 assigned_trackers = associate_detections_to_trackers(detections_for_frame, confs, labels, trackers,
                                                                      flow01, args.confidence_threshold)
 

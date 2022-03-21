@@ -8,7 +8,6 @@ import matplotlib.patches as mpatches
 class Tracker:
 
     def __init__(self, frame_nb, X0, confidence, class_id, transition_variance, observation_variance, delta):
-
         self.transition_covariance = np.diag(transition_variance)
         self.observation_covariance = np.diag(observation_variance)
         self.updated = False
@@ -56,12 +55,12 @@ class Tracker:
         other_conf = sum([tr[2] for tr in self.tracklet])
         return (class_conf+conf) / (other_conf+conf)
 
-
     def get_display_colors(self, display, tracker_nb):
         colors = display.colors
         color = colors[tracker_nb % len(colors)]
         display.legends.append(mpatches.Patch(color=color, label=len(self.tracklet)))
         return colors[tracker_nb % len(colors)]
+
 
 class SMC(Tracker):
     def set_param(param):
