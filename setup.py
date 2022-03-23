@@ -15,7 +15,7 @@ setuptools.setup(
     description="A package containing methods commonly used to make inferences",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/surfriderfoundationeurope/surfnet.git",
+    url="https://github.com/Chayma-mesbahi/surfnet.git",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
